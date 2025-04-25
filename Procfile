@@ -1,1 +1,1 @@
-worker: python main_12.py
+worker: python main_12_updated.py
