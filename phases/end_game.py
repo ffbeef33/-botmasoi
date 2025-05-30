@@ -113,8 +113,24 @@ async def handle_game_end(interaction: discord.Interaction, game_state):
     
     # Lưu thông tin setup trước khi reset
     try:
+        # Tạo bản sao cụ thể của dữ liệu setup
+        try:
+            game_state.preserved_setup = {
+                "temp_admin_id": game_state.temp_admin_id,
+                "temp_players": game_state.temp_players.copy() if hasattr(game_state, 'temp_players') and game_state.temp_players else [],
+                "temp_roles": game_state.temp_roles.copy() if hasattr(game_state, 'temp_roles') and game_state.temp_roles else {}
+            }
+        except:
+            game_state["preserved_setup"] = {
+                "temp_admin_id": game_state.get("temp_admin_id"),
+                "temp_players": game_state.get("temp_players", [])[:]  # Tạo bản sao
+                "temp_roles": game_state.get("temp_roles", {}).copy()  # Tạo bản sao
+            }
+        
         # Đánh dấu rằng setup được lưu trữ
         game_state["setup_preserved"] = True
+        
+        logger.info("Game setup preserved successfully")
     except Exception as e:
         logger.error(f"Error preserving game setup: {str(e)}")
     
