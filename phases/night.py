@@ -633,33 +633,28 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
                 target_role = game_state["players"][target_id]["role"]
                 explorer_id = game_state["explorer_id"]
                 explorer_member = game_state["member_cache"].get(explorer_id)
+                target_member = game_state["member_cache"].get(target_id)
+                
+                # Gửi thông báo chung cho Explorer, không cho biết đúng hay sai
+                if explorer_member and target_member:
+                    await explorer_member.send(f"Bạn đã khám phá {target_member.display_name}.")
                 
                 if target_role in ["Werewolf", "Wolfman", "Assassin Werewolf", "Demon Werewolf"]:
                     # Khám phá đúng Sói
-                    if target_id == game_state["witch_target_save_id"]:
-                        if explorer_member:
-                            await explorer_member.send("Bạn đã khám phá đúng, nhưng Phù Thủy đã cứu người đó! Bạn vẫn giữ chức năng.")
-                    elif target_id != game_state["protected_player_id"]:
+                    if target_id != game_state["witch_target_save_id"] and target_id != game_state["protected_player_id"]:
+                        # Chỉ xử lý cái chết nếu mục tiêu không được bảo vệ
                         target_data = game_state["players"][target_id]
-                        target_member = game_state["member_cache"].get(target_id)
                         
-                        if target_member:
-                            if target_data["role"] == "Tough Guy" and target_data["status"] == "alive":
-                                target_data["status"] = "wounded"
-                            else:
-                                target_data["status"] = "dead"
-                                if target_member.display_name not in dead_players:
-                                    dead_players.append(target_member.display_name)
-                                await handle_player_death(interaction, target_member, target_id, game_state, interaction.guild)
-                            
-                            if explorer_member:
-                                await explorer_member.send(f"Bạn đã khám phá và giết {target_member.display_name}!")
+                        if target_data["role"] == "Tough Guy" and target_data["status"] == "alive":
+                            target_data["status"] = "wounded"
+                        else:
+                            target_data["status"] = "dead"
+                            if target_member and target_member.display_name not in dead_players:
+                                dead_players.append(target_member.display_name)
+                            await handle_player_death(interaction, target_member, target_id, game_state, interaction.guild)
                 else:
-                    # Khám phá sai - người khám phá chết
-                    if explorer_id == game_state["witch_target_save_id"] or explorer_id == game_state["protected_player_id"]:
-                        if explorer_member:
-                            await explorer_member.send("Bạn đã khám phá sai nhưng được bảo vệ! Bạn vẫn giữ chức năng.")
-                    else:
+                    # Khám phá sai - người khám phá chết nếu không được bảo vệ
+                    if explorer_id != game_state["witch_target_save_id"] and explorer_id != game_state["protected_player_id"]:
                         explorer_data = game_state["players"][explorer_id]
                         if explorer_data["role"] == "Tough Guy" and explorer_data["status"] == "alive":
                             explorer_data["status"] = "wounded"
@@ -668,9 +663,6 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
                             if explorer_member and explorer_member.display_name not in dead_players:
                                 dead_players.append(explorer_member.display_name)
                             await handle_player_death(interaction, explorer_member, explorer_id, game_state, interaction.guild)
-                        
-                        if explorer_member:
-                            await explorer_member.send("Bạn đã khám phá sai và tự sát!")
     
     # 5. Xử lý hành động của Sói Ám Sát
     if game_state["assassin_werewolf_has_acted"] and game_state["assassin_werewolf_target_id"] and game_state["assassin_werewolf_role_guess"]:
