@@ -111,6 +111,13 @@ async def handle_game_end(interaction: discord.Interaction, game_state):
     else:
         logger.warning("Text channel not set, cannot send game ending message")
     
+    # Lưu thông tin setup trước khi reset
+    try:
+        # Đánh dấu rằng setup được lưu trữ
+        game_state["setup_preserved"] = True
+    except Exception as e:
+        logger.error(f"Error preserving game setup: {str(e)}")
+    
     # Reset game state
     await reset_game_state(interaction, game_state)
     
@@ -521,20 +528,23 @@ def reset_game_variables(game_state):
     # Giữ lại thông tin để khởi động lại game
     try:
         temp_admin_id = game_state.temp_admin_id
-        temp_players = game_state.temp_players
-        temp_roles = game_state.temp_roles
+        temp_players = game_state.temp_players.copy() if hasattr(game_state, 'temp_players') else []
+        temp_roles = game_state.temp_roles.copy() if hasattr(game_state, 'temp_roles') else {}
         guild_id = game_state.guild_id
         voice_channel_id = game_state.voice_channel_id
         text_channel = game_state.text_channel
         member_cache = game_state.member_cache
     except:
         temp_admin_id = game_state.get("temp_admin_id")
-        temp_players = game_state.get("temp_players")
-        temp_roles = game_state.get("temp_roles")
+        temp_players = game_state.get("temp_players", [])[:]  # Tạo bản sao
+        temp_roles = game_state.get("temp_roles", {}).copy()  # Tạo bản sao
         guild_id = game_state.get("guild_id")
         voice_channel_id = game_state.get("voice_channel_id")
         text_channel = game_state.get("text_channel")
         member_cache = game_state.get("member_cache")
+    
+    # Đánh dấu setup đã được lưu
+    setup_preserved = True
     
     # Reset tất cả biến game state
     try:
@@ -627,5 +637,6 @@ def reset_game_variables(game_state):
         game_state["voice_channel_id"] = voice_channel_id
         game_state["text_channel"] = text_channel
         game_state["member_cache"] = member_cache
+        game_state["setup_preserved"] = setup_preserved  # Thêm dòng này
     
     logger.info(f"Reset game variables for guild {guild_id}")
