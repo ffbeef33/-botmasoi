@@ -528,8 +528,8 @@ def reset_game_variables(game_state):
     # Giữ lại thông tin để khởi động lại game
     try:
         temp_admin_id = game_state.temp_admin_id
-        temp_players = game_state.temp_players.copy() if hasattr(game_state, 'temp_players') else []
-        temp_roles = game_state.temp_roles.copy() if hasattr(game_state, 'temp_roles') else {}
+        temp_players = game_state.temp_players.copy() if hasattr(game_state, 'temp_players') and game_state.temp_players else []
+        temp_roles = game_state.temp_roles.copy() if hasattr(game_state, 'temp_roles') and game_state.temp_roles else {}
         guild_id = game_state.guild_id
         voice_channel_id = game_state.voice_channel_id
         text_channel = game_state.text_channel
@@ -629,6 +629,7 @@ def reset_game_variables(game_state):
         game_state.voice_channel_id = voice_channel_id
         game_state.text_channel = text_channel
         game_state.member_cache = member_cache
+        game_state.setup_preserved = setup_preserved  # Thêm dòng này
     except:
         game_state["temp_admin_id"] = temp_admin_id
         game_state["temp_players"] = temp_players
@@ -637,6 +638,6 @@ def reset_game_variables(game_state):
         game_state["voice_channel_id"] = voice_channel_id
         game_state["text_channel"] = text_channel
         game_state["member_cache"] = member_cache
-        game_state["setup_preserved"] = setup_preserved  # Thêm dòng này
+        game_state["setup_preserved"] = setup_preserved
     
-    logger.info(f"Reset game variables for guild {guild_id}")
+    logger.info(f"Reset game variables for guild {guild_id} and preserved game setup")
