@@ -694,12 +694,6 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
                         if target_member and target_member.display_name not in dead_players:
                             dead_players.append(target_member.display_name)
                         await handle_player_death(interaction, target_member, target_id, game_state, interaction.guild)
-                    
-                    if assassin_member:
-                        await assassin_member.send(f"Bạn đoán đúng! {target_member.display_name} là {actual_role} và đã chết.")
-                else:
-                    if assassin_member:
-                        await assassin_member.send(f"Bạn đoán đúng, nhưng {target_member.display_name} được bảo vệ!")
             else:
                 # Đoán sai, Sói Ám Sát chết
                 if assassin_id != game_state["witch_target_save_id"] and assassin_id != game_state["protected_player_id"]:
@@ -711,12 +705,10 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
                         if assassin_member and assassin_member.display_name not in dead_players:
                             dead_players.append(assassin_member.display_name)
                         await handle_player_death(interaction, assassin_member, assassin_id, game_state, interaction.guild)
-                    
-                    if assassin_member:
-                        await assassin_member.send(f"Bạn đoán sai! {target_member.display_name} không phải là {role_guess}. Bạn đã chết.")
-                else:
-                    if assassin_member:
-                        await assassin_member.send(f"Bạn đoán sai, nhưng bạn được bảo vệ!")
+            
+            # Gửi thông báo chung cho Sói Ám Sát, không cho biết đoán đúng hay sai
+            if assassin_member:
+                await assassin_member.send(f"Bạn đã đoán {target_member.display_name} là {role_guess}. Bạn đã sử dụng hết chức năng đặc biệt của mình.")
         
         # Reset trạng thái Sói Ám Sát
         game_state["assassin_werewolf_target_id"] = None
