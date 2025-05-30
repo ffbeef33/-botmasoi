@@ -379,14 +379,31 @@ async def process_witch_actions(interaction: discord.Interaction, game_state):
     
     # Thu thập tất cả các hành động giết
     actions = []
-    
+        
     # Hành động của Sói
     if game_state["werewolf_target_id"] and not game_state["demon_werewolf_cursed_this_night"]:
         actions.append(("werewolf", game_state["werewolf_target_id"]))
     
-    # Hành động của Thợ Săn
-    if game_state["hunter_target_id"]:
-        actions.append(("hunter", game_state["hunter_target_id"]))
+    # Hành động của Sói Ám Sát
+    if game_state["assassin_werewolf_has_acted"] and game_state["assassin_werewolf_target_id"] and game_state["assassin_werewolf_role_guess"]:
+        target_id = game_state["assassin_werewolf_target_id"]
+        role_guess = game_state["assassin_werewolf_role_guess"]
+        
+        if target_id in game_state["players"] and game_state["players"][target_id]["status"] in ["alive", "wounded"]:
+            actual_role = game_state["players"][target_id]["role"]
+            assassin_id = next((uid for uid, d in game_state["players"].items() if d["role"] == "Assassin Werewolf"), None)
+            
+            if actual_role == role_guess:
+                # Đoán đúng, nạn nhân sẽ chết
+                actions.append(("assassin_correct", target_id))
+            else:
+                # Đoán sai, Sói Ám Sát sẽ chết
+                if assassin_id:
+                    actions.append(("assassin_wrong", assassin_id))
+    
+# Hành động của Thợ Săn
+if game_state["hunter_target_id"]:
+    actions.append(("hunter", game_state["hunter_target_id"]))
     
     # Hành động của Người Khám Phá
     if game_state["night_count"] >= 2 and game_state["explorer_target_id"]:
