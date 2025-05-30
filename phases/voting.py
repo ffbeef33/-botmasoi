@@ -274,14 +274,22 @@ async def process_vote_results(interaction: discord.Interaction, game_state):
     
     # Đếm phiếu
     vote_counts, skip_votes, ineligible_count = count_votes(game_state)
-    non_vote_count = skip_votes + ineligible_count
+    
+    # Total non-vote = skip_votes + ineligible_count (dùng để hiển thị)
+    display_non_vote_count = skip_votes + ineligible_count
+    
+    # THAY ĐỔI: Chỉ sử dụng skip_votes (không bao gồm ineligible_count) khi so sánh với số phiếu cao nhất
+    # để quyết định người bị loại
     
     if vote_counts:
         # Tìm người có số phiếu cao nhất
         max_votes = max(vote_counts.values()) if vote_counts else 0
         candidates = [k for k, v in vote_counts.items() if v == max_votes]
         
-        if len(candidates) == 1 and max_votes > non_vote_count:
+        # THAY ĐỔI: Chỉ loại người chơi nếu:
+        # 1. Có một người duy nhất có số phiếu cao nhất (không có đồng phiếu)
+        # 2. Số phiếu cao nhất phải lớn hơn số phiếu bỏ qua (không tính người không đủ điều kiện)
+        if len(candidates) == 1 and max_votes > skip_votes:
             # Có một người được chọn duy nhất với số phiếu cao nhất
             eliminated_id = candidates[0]
             eliminated_member = game_state["member_cache"].get(eliminated_id)
@@ -312,15 +320,15 @@ async def process_vote_results(interaction: discord.Interaction, game_state):
                     game_logs[interaction.guild.id].append(f"{eliminated_member.display_name} bị ngồi ghế điện với {max_votes} phiếu.")
                     
                 return True  # Có người bị loại
-                
+        
         elif len(candidates) > 1:
-            # Có đồng phiếu
+            # Có đồng phiếu giữa các người chơi
             candidate_names = [game_state["member_cache"].get(c).display_name for c in candidates if game_state["member_cache"].get(c)]
             await text_channel.send(f"**Có đồng phiếu giữa {', '.join(candidate_names)}! Không ai bị loại.**")
             
         else:
             # Số phiếu bỏ qua cao hơn hoặc bằng số phiếu cao nhất
-            await text_channel.send(f"**Không ai bị loại!** Số phiếu 'bỏ qua/không đủ điều kiện' ({non_vote_count}) cao hơn hoặc bằng số phiếu cao nhất ({max_votes}).")
+            await text_channel.send(f"**Không ai bị loại!** Số phiếu 'bỏ qua' cao hơn hoặc bằng số phiếu cao nhất ({max_votes}).")
             
     else:
         # Không có phiếu bầu nào
