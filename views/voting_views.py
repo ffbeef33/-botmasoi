@@ -122,41 +122,84 @@ class GameEndView(discord.ui.View):
 
     @discord.ui.button(label="Start New Game", style=discord.ButtonStyle.green)
     async def start_new_game(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.admin_id:
-            await interaction.response.send_message("Chỉ người chạy lệnh /start_game được thao tác!", ephemeral=True)
-            return
+        try:
+            if interaction.user.id != self.admin_id:
+                await interaction.response.send_message("Chỉ người chạy lệnh /start_game được thao tác!", ephemeral=True)
+                return
+                
+            embed = discord.Embed(
+                title="🎮 Bắt Đầu Game Mới",
+                description="Đang khởi tạo game mới với cùng người chơi và vai trò...",
+                color=discord.Color.green()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             
-        embed = discord.Embed(
-            title="🎮 Bắt Đầu Game Mới",
-            description="Đang khởi tạo game mới với cùng người chơi và vai trò...",
-            color=discord.Color.green()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        # Import hàm khởi động game mới ở đây để tránh circular import
-        from phases.game_setup import start_new_game_with_same_setup
-        await start_new_game_with_same_setup(self.interaction, self.game_state)
+            # Disable button để ngăn nhấn nhiều lần
+            button.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except:
+                logger.warning("Không thể cập nhật nút sau khi nhấn")
+            
+            # Import hàm khởi động game mới ở đây để tránh circular import
+            from phases.game_setup import start_new_game_with_same_setup
+            # Sửa: Sử dụng interaction mới thay vì self.interaction
+            await start_new_game_with_same_setup(interaction, self.game_state)
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi bắt đầu game mới: {str(e)}")
+            try:
+                # Nếu có thể vẫn trả lời được interaction
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(f"Lỗi khi bắt đầu game mới: {str(e)}", ephemeral=True)
+                else:
+                    await interaction.followup.send(f"Lỗi khi bắt đầu game mới: {str(e)}", ephemeral=True)
+            except:
+                # Nếu không thể phản hồi interaction, gửi tin nhắn qua channel
+                try:
+                    await interaction.channel.send(f"Lỗi khi bắt đầu game mới: {str(e)}")
+                except:
+                    logger.error("Không thể gửi thông báo lỗi")
 
     @discord.ui.button(label="End Game", style=discord.ButtonStyle.red)
     async def end_game(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.admin_id:
-            await interaction.response.send_message("Chỉ người chạy lệnh /start_game được thao tác!", ephemeral=True)
-            return
+        try:
+            if interaction.user.id != self.admin_id:
+                await interaction.response.send_message("Chỉ người chạy lệnh /start_game được thao tác!", ephemeral=True)
+                return
+                
+            embed = discord.Embed(
+                title="🛑 Kết Thúc Game",
+                description="Game đã kết thúc hoàn toàn.",
+                color=discord.Color.red()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             
-        embed = discord.Embed(
-            title="🛑 Kết Thúc Game",
-            description="Game đã kết thúc hoàn toàn.",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        
-        # Reset game state
-        self.game_state["temp_players"] = []
-        self.game_state["temp_roles"] = {role: 0 for role in self.game_state["temp_roles"].keys()}
-        self.game_state["temp_admin_id"] = None
-        self.game_state["voice_channel_id"] = None
-        self.game_state["guild_id"] = None
-        self.game_state["text_channel"] = None
-        self.game_state["member_cache"].clear()
-        
-        logger.info(f"Game ended by admin {interaction.user.id}")
+            # Disable button để ngăn nhấn nhiều lần
+            button.disabled = True
+            self.children[0].disabled = True  # Disable nút Start New Game cũng
+            try:
+                await interaction.message.edit(view=self)
+            except:
+                logger.warning("Không thể cập nhật nút sau khi nhấn")
+            
+            # Reset game state
+            self.game_state["temp_players"] = []
+            self.game_state["temp_roles"] = {role: 0 for role in self.game_state["temp_roles"].keys()} if isinstance(self.game_state["temp_roles"], dict) else {}
+            self.game_state["temp_admin_id"] = None
+            self.game_state["voice_channel_id"] = None
+            self.game_state["guild_id"] = None 
+            self.game_state["text_channel"] = None
+            self.game_state["member_cache"].clear()
+            
+            logger.info(f"Game ended by admin {interaction.user.id}")
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi kết thúc game: {str(e)}")
+            try:
+                await interaction.followup.send(f"Lỗi: {str(e)}", ephemeral=True)
+            except:
+                try:
+                    await interaction.channel.send(f"Lỗi khi kết thúc game: {str(e)}")
+                except:
+                    logger.error("Không thể gửi thông báo lỗi")
