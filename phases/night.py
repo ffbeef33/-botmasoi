@@ -401,11 +401,11 @@ async def process_witch_actions(interaction: discord.Interaction, game_state):
                 if assassin_id:
                     actions.append(("assassin_wrong", assassin_id))
     
-    # Hành động của Thợ Săn - SỬA LỖI INDENTATION Ở ĐÂY!
+    # Hành động của Thợ Săn
     if game_state["hunter_target_id"]:
         actions.append(("hunter", game_state["hunter_target_id"]))
     
-    # Hành động của Người Khám Phá - SỬA LỖI INDENTATION Ở ĐÂY!
+    # Hành động của Người Khám Phá
     if game_state["night_count"] >= 2 and game_state["explorer_target_id"]:
         explorer_target_id = game_state["explorer_target_id"]
         target_role = game_state["players"][explorer_target_id]["role"]
@@ -416,13 +416,13 @@ async def process_witch_actions(interaction: discord.Interaction, game_state):
             if explorer_id:
                 actions.append(("explorer", explorer_id))
     
-    # Đếm số lần bị giết, bỏ qua người được Bảo Vệ - SỬA LỖI INDENTATION Ở ĐÂY!
+    # Đếm số lần bị giết, bỏ qua người được Bảo Vệ
     protected_id = game_state["protected_player_id"]
     for action_type, target_id in actions:
         if target_id != protected_id:
             kill_counts[target_id] = kill_counts.get(target_id, 0) + 1
     
-    # Xác định ai sẽ chết và thêm vào potential targets - SỬA LỖI INDENTATION Ở ĐÂY!
+    # Xác định ai sẽ chết và thêm vào potential targets
     for user_id, count in kill_counts.items():
         data = game_state["players"].get(user_id)
         if data and data["status"] in ["alive", "wounded"]:
@@ -513,7 +513,10 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
             target_id = game_state["witch_target_save_id"]
             if target_id in game_state["players"] and game_state["players"][target_id]["status"] in ["alive", "wounded"]:
                 target_data = game_state["players"][target_id]
-                logger.info(f"Witch saving player: target_id={target_id}")
+                logger.info(f"Witch saving player: target_id={target_id}, current status={target_data['status']}")
+                
+                # FIX: Luôn giữ nguyên trạng thái wounded nếu đã bị thương
+                current_status = target_data["status"]
                 
                 # Kiểm tra nếu là Tough Guy và sẽ chết
                 if target_data["role"] == "Tough Guy":
@@ -526,11 +529,18 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
                     if game_state["explorer_target_id"] == target_id:
                         count += 1
                         
-                    if (target_data["status"] == "alive" and count >= 2) or (target_data["status"] == "wounded" and count >= 1):
-                        target_data["status"] = "wounded"
-                        logger.info(f"Witch saved Tough Guy: target_id={target_id}, status set to wounded")
+                    if (current_status == "alive" and count >= 2) or (current_status == "wounded" and count >= 1):
+                        # FIX: Giữ nguyên trạng thái wounded nếu đã wounded
+                        if current_status == "wounded":
+                            # Không thay đổi trạng thái
+                            logger.info(f"Witch saved Tough Guy but kept wounded status: target_id={target_id}")
+                        else:
+                            # Nếu đang alive, chuyển sang wounded do đủ điều kiện chết
+                            target_data["status"] = "wounded"
+                            logger.info(f"Witch saved Tough Guy: target_id={target_id}, status set to wounded from alive")
                     else:
-                        logger.info(f"Witch saved Tough Guy but no status change needed: target_id={target_id}")
+                        # FIX: Giữ nguyên trạng thái, không thay đổi
+                        logger.info(f"Witch saved Tough Guy with no status change needed: target_id={target_id}, status={current_status}")
                 
                 # Hủy các hành động giết
                 if game_state["werewolf_target_id"] == target_id:
