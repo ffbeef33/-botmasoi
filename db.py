@@ -7,6 +7,7 @@ from contextlib import contextmanager, asynccontextmanager
 import logging
 import asyncio
 import json
+import traceback
 from config import DB_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,9 @@ def test_database_connection():
     except mysql.connector.Error as err:
         logger.error(f"Lỗi kiểm tra kết nối cơ sở dữ liệu: {err}")
         return False
+    except Exception as e:
+        logger.error(f"Lỗi không xác định khi kiểm tra kết nối: {str(e)}")
+        return False
 
 @contextmanager
 def get_db_connection():
@@ -55,11 +59,14 @@ def get_db_connection():
         conn = pool.get_connection()
         yield conn
     except mysql.connector.Error as err:
-        logger.error(f"Lỗi MySQL: {err}")
+        logger.error(f"Lỗi MySQL khi lấy kết nối: {err}")
         raise
     finally:
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception as e:
+                logger.error(f"Lỗi khi đóng kết nối: {str(e)}")
 
 # Thêm async context manager cho việc sử dụng với async/await
 @asynccontextmanager
@@ -77,13 +84,16 @@ async def get_db_connection_async():
         conn = await loop.run_in_executor(None, pool.get_connection)
         yield conn
     except mysql.connector.Error as err:
-        logger.error(f"Lỗi MySQL: {err}")
+        logger.error(f"Lỗi MySQL khi lấy kết nối async: {err}")
         raise
     finally:
         if conn:
-            await loop.run_in_executor(None, conn.close)
+            try:
+                await loop.run_in_executor(None, conn.close)
+            except Exception as e:
+                logger.error(f"Lỗi khi đóng kết nối async: {str(e)}")
 
-def execute_query(query, params=None, fetch=False, commit=True):
+def execute_query(query, params=None, fetch=False, commit=True, many=False):
     """
     Thực thi một truy vấn SQL và trả về kết quả nếu cần
     
@@ -92,13 +102,19 @@ def execute_query(query, params=None, fetch=False, commit=True):
         params (tuple, list, dict): Tham số cho truy vấn
         fetch (bool): Có lấy kết quả hay không
         commit (bool): Có commit sau khi thực hiện hay không
+        many (bool): Có phải thực hiện executemany không
     
     Returns:
         list: Kết quả của truy vấn nếu fetch=True, None nếu không
+        int: Số dòng bị ảnh hưởng
     """
     result = None
     
     try:
+        if not pool:
+            logger.error("Không thể thực thi truy vấn: Pool kết nối MySQL chưa được khởi tạo")
+            return None, 0
+            
         with get_db_connection() as conn:
             try:
                 cursor = conn.cursor(dictionary=True)
@@ -108,11 +124,10 @@ def execute_query(query, params=None, fetch=False, commit=True):
                 logger.debug(f"Với tham số: {params}")
                 
                 # Xử lý các loại tham số khác nhau
-                if isinstance(params, (list, tuple)) and len(params) > 0 and isinstance(params[0], (list, tuple)):
-                    # Xử lý chèn/cập nhật hàng loạt
+                if many and isinstance(params, (list, tuple)):
                     cursor.executemany(query, params)
+                    logger.debug(f"Đã thực thi executemany với {len(params)} dòng dữ liệu")
                 else:
-                    # Thực thi truy vấn đơn
                     cursor.execute(query, params or ())
                 
                 if fetch:
@@ -137,16 +152,27 @@ def execute_query(query, params=None, fetch=False, commit=True):
                 raise
     except Exception as e:
         logger.error(f"Lỗi kết nối cơ sở dữ liệu: {str(e)}")
+        logger.error(traceback.format_exc())
         raise
 
-async def execute_async_query(query, params=None, fetch=False):
+async def execute_async_query(query, params=None, fetch=False, many=False):
     """
     Thực thi truy vấn SQL một cách bất đồng bộ
+    
+    Args:
+        query (str): Câu truy vấn SQL
+        params (tuple, list, dict): Tham số cho truy vấn
+        fetch (bool): Có lấy kết quả hay không
+        many (bool): Có phải thực hiện executemany không
+    
+    Returns:
+        list: Kết quả của truy vấn nếu fetch=True, None nếu không
+        int: Số dòng bị ảnh hưởng
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None, 
-        lambda: execute_query(query, params, fetch)
+        lambda: execute_query(query, params, fetch, True, many)
     )
 
 def init_database():
@@ -201,6 +227,7 @@ def init_database():
         return True
     except Exception as e:
         logger.error(f"Lỗi khởi tạo cơ sở dữ liệu: {e}")
+        logger.error(traceback.format_exc())
         return False
 
 def update_database_schema():
@@ -260,6 +287,7 @@ def update_database_schema():
         return True
     except Exception as e:
         logger.error(f"Lỗi cập nhật schema database: {e}")
+        logger.error(traceback.format_exc())
         return False
 
 async def update_leaderboard(guild_id, player_updates):
@@ -272,37 +300,72 @@ async def update_leaderboard(guild_id, player_updates):
             {player_id: {"name": "Player Name", "score": 3}}
     """
     try:
+        # Kiểm tra kết nối
+        if not pool:
+            logger.error("Không thể cập nhật leaderboard: Pool kết nối MySQL chưa được khởi tạo")
+            return False
+            
         # Chuyển đổi guild_id sang số nguyên để đảm bảo đúng kiểu
         guild_id = int(guild_id)
         updates = []
         
+        # Chuẩn bị dữ liệu cập nhật
         for player_id, data in player_updates.items():
+            # Đảm bảo player_id là số nguyên
+            player_id_int = int(player_id)
+            player_name = data.get("name", "Unknown Player")
+            score = data.get("score", 0)
+            
+            if not player_name or player_name == "Unknown Player":
+                logger.warning(f"Người chơi {player_id_int} không có tên hợp lệ")
+            
             updates.append((
                 guild_id,
-                int(player_id), 
-                data["name"], 
-                data["score"],
-                data["score"]
+                player_id_int, 
+                player_name, 
+                score,
+                1  # games_played
             ))
         
         if updates:
+            # Sử dụng Insert ... ON DUPLICATE KEY UPDATE để cập nhật hàng loạt
             query = """
                 INSERT INTO leaderboard (guild_id, player_id, player_name, score, games_played)
-                VALUES (%s, %s, %s, %s, 1)
+                VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                 player_name = VALUES(player_name),
                 score = score + VALUES(score),
                 games_played = games_played + 1
             """
             
-            for update in updates:
-                await execute_async_query(query, update, fetch=False)
-            
-            logger.info(f"Cập nhật leaderboard thành công cho {len(updates)} người chơi trong guild {guild_id}")
-            return True
-        return False
+            # Sử dụng executemany để cập nhật tất cả trong một lần
+            try:
+                _, affected_rows = await execute_async_query(query, updates, fetch=False, many=True)
+                if affected_rows > 0:
+                    logger.info(f"Cập nhật leaderboard thành công cho {len(updates)} người chơi trong guild {guild_id}")
+                else:
+                    logger.warning(f"Cập nhật leaderboard không ảnh hưởng đến dòng nào")
+                return True
+            except Exception as e:
+                # Nếu executemany thất bại, thử lại từng cập nhật một
+                logger.warning(f"Cập nhật hàng loạt thất bại, đang thử cập nhật từng người: {str(e)}")
+                success_count = 0
+                for update in updates:
+                    try:
+                        _, affected = await execute_async_query(query, update, fetch=False)
+                        if affected > 0:
+                            success_count += 1
+                    except Exception as inner_e:
+                        logger.error(f"Cập nhật thất bại cho người chơi {update[1]}: {str(inner_e)}")
+                
+                logger.info(f"Cập nhật leaderboard thành công cho {success_count}/{len(updates)} người chơi trong guild {guild_id}")
+                return success_count > 0
+        else:
+            logger.warning("Không có dữ liệu cập nhật cho leaderboard")
+            return False
     except Exception as e:
         logger.error(f"Lỗi cập nhật leaderboard: {e}")
+        logger.error(traceback.format_exc())
         return False
 
 async def update_player_stats(guild_id, user_id, player_name, win=False, role=""):
@@ -321,6 +384,14 @@ async def update_player_stats(guild_id, user_id, player_name, win=False, role=""
         guild_id = int(guild_id)
         user_id = int(user_id)
         
+        # Sanitize player_name
+        if not player_name or player_name == "":
+            player_name = "Unknown Player"
+            
+        # Sanitize role
+        if not role or role == "":
+            role = "Unknown"
+            
         # Điểm cộng thêm dựa trên kết quả
         score_change = 3 if win else 1
         
@@ -368,12 +439,14 @@ async def update_player_stats(guild_id, user_id, player_name, win=False, role=""
                 user_id
             )
             
-            result, affected_rows = await execute_async_query(query_update, params, fetch=False)
+            _, affected_rows = await execute_async_query(query_update, params)
             
             if affected_rows == 0:
                 logger.warning(f"Cập nhật cho người chơi {player_name} ({user_id}) không có tác dụng")
+                return False
             else:
                 logger.info(f"Đã cập nhật thống kê cho người chơi {player_name} ({user_id}): +{score_change} điểm, thắng={win}")
+                return True
                 
         else:
             # Người chơi chưa tồn tại, thêm mới
@@ -395,16 +468,18 @@ async def update_player_stats(guild_id, user_id, player_name, win=False, role=""
                 json.dumps(role_wins)
             )
             
-            result, affected_rows = await execute_async_query(query_insert, params, fetch=False)
+            _, affected_rows = await execute_async_query(query_insert, params)
             
             if affected_rows == 0:
                 logger.warning(f"Thêm mới người chơi {player_name} ({user_id}) không có tác dụng")
+                return False
             else:
                 logger.info(f"Đã thêm người chơi mới {player_name} ({user_id}) với {score_change} điểm, thắng={win}")
+                return True
             
-        return True
     except Exception as e:
         logger.error(f"Lỗi khi cập nhật thống kê người chơi {player_name} ({user_id}): {str(e)}")
+        logger.error(traceback.format_exc())
         return False
 
 async def update_all_player_stats(game_state, winner="no_one"):
@@ -416,32 +491,62 @@ async def update_all_player_stats(game_state, winner="no_one"):
         winner (str): Phe thắng cuộc ("werewolves", "villagers", "no_one")
     """
     try:
+        # Kiểm tra kết nối
+        if not pool:
+            logger.error("Không thể cập nhật player stats: Pool kết nối MySQL chưa được khởi tạo")
+            return False
+            
         guild_id = game_state.get("guild_id")
         if not guild_id:
             logger.error("Cannot update leaderboard: guild_id not found in game_state")
             return False
             
+        # Đảm bảo guild_id là số nguyên
+        guild_id = int(guild_id)
+            
         update_tasks = []
         player_updates = {}
         
-        for user_id, data in game_state["players"].items():
-            user_id_str = str(user_id)
-            role = data.get("role", "Unknown")
-            player_name = "Unknown"
+        # In thông tin game_state để debug
+        logger.debug(f"Game state type: {type(game_state)}")
+        logger.debug(f"Game state keys: {list(game_state.keys() if hasattr(game_state, 'keys') else [])}")
+        
+        # Kiểm tra cấu trúc của players
+        if not game_state.get("players"):
+            logger.error("Game state không chứa thông tin người chơi")
+            return False
             
-            # Lấy tên người chơi từ member_cache nếu có
+        # Đảm bảo member_cache tồn tại
+        if not game_state.get("member_cache"):
+            logger.warning("Game state không có member_cache, sử dụng tên mặc định")
+            game_state["member_cache"] = {}
+            
+        for user_id_raw, data in game_state["players"].items():
+            # Đảm bảo user_id luôn là int
+            user_id = int(user_id_raw)
+            user_id_str = str(user_id)
+            
+            # Lấy vai trò người chơi
+            role = data.get("role", "Unknown")
+            player_name = "Unknown Player"
+            
+            # Thử lấy tên người chơi từ member_cache - kiểm tra cả dạng string và int key
             if user_id_str in game_state.get("member_cache", {}):
-                player_name = game_state["member_cache"][user_id_str].display_name
+                member = game_state["member_cache"][user_id_str]
+                player_name = getattr(member, "display_name", "Unknown Player")
             elif user_id in game_state.get("member_cache", {}):
-                player_name = game_state["member_cache"][user_id].display_name
+                member = game_state["member_cache"][user_id]
+                player_name = getattr(member, "display_name", "Unknown Player")
                 
             # Xác định người chơi có thắng hay không
             is_winner = False
             
-            if winner == "werewolves" and role in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf", "Illusionist"]:
-                is_winner = True
-            elif winner == "villagers" and role not in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf"]:
-                is_winner = True
+            if winner == "werewolves":
+                if role in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf", "Illusionist"]:
+                    is_winner = True
+            elif winner == "villagers":
+                if role not in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf"]:
+                    is_winner = True
             
             # Ghi log thông tin cập nhật
             logger.info(f"Chuẩn bị cập nhật: Player={player_name}, ID={user_id}, Role={role}, Winner={is_winner}")
@@ -457,58 +562,81 @@ async def update_all_player_stats(game_state, winner="no_one"):
         
         # Thực hiện tất cả các cập nhật cùng lúc
         if update_tasks:
-            results = await asyncio.gather(*update_tasks, return_exceptions=True)
-            
-            # Kiểm tra kết quả - nếu có lỗi, thử cập nhật bằng phương pháp khác
-            has_error = any(isinstance(r, Exception) for r in results)
-            if has_error:
-                logger.warning(f"Có lỗi khi cập nhật riêng lẻ, đang thử phương pháp update_leaderboard")
-                await update_leaderboard(guild_id, player_updates)
-            
-            logger.info(f"Updated leaderboard for {len(update_tasks)} players in guild {guild_id}")
+            # Đầu tiên thử phương pháp update_leaderboard
+            try:
+                logger.info("Bắt đầu cập nhật leaderboard bằng phương pháp hàng loạt")
+                batch_update_successful = await update_leaderboard(guild_id, player_updates)
+                if batch_update_successful:
+                    logger.info(f"Cập nhật hàng loạt thành công cho {len(player_updates)} người chơi")
+                else:
+                    logger.warning("Cập nhật hàng loạt thất bại, đang thử phương pháp cập nhật riêng lẻ")
+                    raise Exception("Batch update failed")
+            except Exception:
+                # Nếu thất bại, thử phương pháp cập nhật riêng lẻ
+                logger.info("Đang thực hiện cập nhật riêng lẻ")
+                results = await asyncio.gather(*update_tasks, return_exceptions=True)
+                
+                # Kiểm tra kết quả
+                success_count = sum(1 for r in results if r is True)
+                error_count = sum(1 for r in results if isinstance(r, Exception))
+                failed_count = len(results) - success_count - error_count
+                
+                logger.info(f"Kết quả cập nhật riêng lẻ: {success_count} thành công, {failed_count} thất bại, {error_count} lỗi")
+                
+                # Log lỗi chi tiết
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Lỗi cập nhật người chơi thứ {i}: {str(result)}")
             
             # Lưu log kết quả game
-            werewolf_count = sum(1 for _, d in game_state["players"].items() 
-                               if d.get("role") in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf"])
-            villager_count = len(game_state["players"]) - werewolf_count
-            
-            # Chuẩn bị dữ liệu người chơi để lưu vào logs
-            players_data = {}
-            for user_id, data in game_state["players"].items():
-                user_id_str = str(user_id)
-                player_name = "Unknown"
+            try:
+                werewolf_count = sum(1 for _, d in game_state["players"].items() 
+                                if d.get("role") in ["Werewolf", "Wolfman", "Demon Werewolf", "Assassin Werewolf", "Illusionist"])
+                villager_count = len(game_state["players"]) - werewolf_count
                 
-                if user_id_str in game_state.get("member_cache", {}):
-                    player_name = game_state["member_cache"][user_id_str].display_name
-                elif user_id in game_state.get("member_cache", {}):
-                    player_name = game_state["member_cache"][user_id].display_name
+                # Chuẩn bị dữ liệu người chơi để lưu vào logs
+                players_data = {}
+                for user_id_raw, data in game_state["players"].items():
+                    user_id = int(user_id_raw)
+                    user_id_str = str(user_id)
+                    player_name = "Unknown Player"
                     
-                players_data[user_id] = {
-                    "name": player_name,
-                    "role": data.get("role", "Unknown"),
-                    "status": data.get("status", "unknown")
-                }
+                    if user_id_str in game_state.get("member_cache", {}):
+                        member = game_state["member_cache"][user_id_str]
+                        player_name = getattr(member, "display_name", "Unknown Player")
+                    elif user_id in game_state.get("member_cache", {}):
+                        member = game_state["member_cache"][user_id]
+                        player_name = getattr(member, "display_name", "Unknown Player")
+                        
+                    players_data[user_id_str] = {
+                        "name": player_name,
+                        "role": data.get("role", "Unknown"),
+                        "status": data.get("status", "unknown")
+                    }
+                    
+                log_message = f"Game kết thúc. Kết quả: {winner.capitalize()} thắng!"
                 
-            log_message = f"Game kết thúc. Kết quả: {winner.capitalize()} thắng!"
-            
-            await save_game_log(
-                guild_id, 
-                log_message, 
-                winner, 
-                len(game_state["players"]), 
-                werewolf_count, 
-                villager_count, 
-                game_state.get("night_count", 0), 
-                json.dumps(players_data)
-            )
+                await save_game_log(
+                    guild_id, 
+                    log_message, 
+                    winner, 
+                    len(game_state["players"]), 
+                    werewolf_count, 
+                    villager_count, 
+                    game_state.get("night_count", 0), 
+                    json.dumps(players_data)
+                )
+            except Exception as e:
+                logger.error(f"Lỗi khi lưu log game: {str(e)}")
+                logger.error(traceback.format_exc())
             
             return True
         
+        logger.warning("Không có người chơi nào để cập nhật")
         return False
     except Exception as e:
         logger.error(f"Error updating all player stats: {str(e)}")
-        traceback_info = __import__('traceback').format_exc()
-        logger.error(f"Traceback: {traceback_info}")
+        logger.error(traceback.format_exc())
         return False
 
 async def get_leaderboard(guild_id, limit=10):
@@ -523,6 +651,7 @@ async def get_leaderboard(guild_id, limit=10):
         list: Danh sách người chơi và điểm
     """
     try:
+        guild_id = int(guild_id)
         query = """
             SELECT player_name, score, games_played, wins, role_counts, role_wins 
             FROM leaderboard
@@ -535,6 +664,7 @@ async def get_leaderboard(guild_id, limit=10):
         return results
     except Exception as e:
         logger.error(f"Lỗi lấy dữ liệu leaderboard: {e}")
+        logger.error(traceback.format_exc())
         return []
 
 async def save_game_log(guild_id, log_message, winner=None, players_count=0, werewolves_count=0, villagers_count=0, duration=0, players_data=None):
@@ -552,6 +682,7 @@ async def save_game_log(guild_id, log_message, winner=None, players_count=0, wer
         players_data (str, optional): Dữ liệu JSON về người chơi
     """
     try:
+        guild_id = int(guild_id)
         query = """
             INSERT INTO game_logs (
                 guild_id, log_message, winner, players_count, 
@@ -560,14 +691,18 @@ async def save_game_log(guild_id, log_message, winner=None, players_count=0, wer
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
         
-        await execute_async_query(
-            query, 
-            (guild_id, log_message, winner, players_count, werewolves_count, villagers_count, duration, players_data), 
-            fetch=False
-        )
-        return True
+        params = (guild_id, log_message, winner, players_count, werewolves_count, villagers_count, duration, players_data)
+        _, affected_rows = await execute_async_query(query, params)
+        
+        if affected_rows > 0:
+            logger.info(f"Đã lưu log game cho guild {guild_id}: {winner} thắng")
+            return True
+        else:
+            logger.warning(f"Không thể lưu log game cho guild {guild_id}")
+            return False
     except Exception as e:
         logger.error(f"Lỗi lưu game log: {e}")
+        logger.error(traceback.format_exc())
         return False
 
 async def get_game_logs(guild_id, limit=10):
@@ -582,6 +717,7 @@ async def get_game_logs(guild_id, limit=10):
         list: Danh sách các bản ghi game, hoặc list rỗng nếu không có
     """
     try:
+        guild_id = int(guild_id)
         query = """
             SELECT id, guild_id, timestamp, log_message, winner, 
             players_count, werewolves_count, villagers_count, duration, players_data
@@ -595,4 +731,5 @@ async def get_game_logs(guild_id, limit=10):
         return results
     except Exception as e:
         logger.error(f"Lỗi khi lấy game logs: {str(e)}")
+        logger.error(traceback.format_exc())
         return []
