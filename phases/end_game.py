@@ -45,6 +45,29 @@ async def end_game(interaction, game_state, winner="no_one", reason="Game đã k
             except:
                 logger.warning("Không thể gửi response hoặc followup khi kết thúc game")
                 
+        # ===== CẬP NHẬT LEADERBOARD TRƯỚC KHI LÀM BẤT CỨ ĐIỀU GÌ KHÁC =====
+        try:
+            # Chuẩn hóa winner để đảm bảo đúng định dạng
+            normalized_winner = winner
+            if winner == "wolves":
+                normalized_winner = "werewolves"
+            elif winner == "humans":
+                normalized_winner = "villagers"
+                
+            # Gọi hàm cập nhật leaderboard 
+            logger.info(f"Cập nhật leaderboard cho game kết thúc với winner: {normalized_winner}")
+            update_success = await update_all_player_stats(game_state, normalized_winner)
+            if update_success:
+                logger.info("Cập nhật leaderboard thành công")
+            else:
+                logger.error("Cập nhật leaderboard thất bại")
+                
+            # Đánh dấu rằng leaderboard đã được cập nhật để tránh cập nhật lặp lại
+            game_state["leaderboard_updated"] = True
+        except Exception as e:
+            logger.error(f"Lỗi khi cập nhật leaderboard: {str(e)}")
+            traceback.print_exc()
+                
         # Phát âm thanh kết thúc game
         try:
             voice_conn = None
