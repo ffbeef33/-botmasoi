@@ -422,6 +422,9 @@ async def direct_update_leaderboard(guild_id, user_id, player_name, points=1, wi
         if not player_name or player_name == "":
             player_name = "Unknown Player"
         
+        # Ghi log thông tin điểm số
+        logger.info(f"Direct update leaderboard: Player={player_name}, UserID={user_id}, Points={points:+d}, Wins={wins}, Role={role}")
+        
         # Kiểm tra xem người chơi đã tồn tại chưa
         check_query = "SELECT id, role_counts, role_wins FROM leaderboard WHERE guild_id = %s AND player_id = %s"
         result, _ = await execute_async_query(check_query, (guild_id, user_id), fetch=True)
@@ -453,8 +456,12 @@ async def direct_update_leaderboard(guild_id, user_id, player_name, points=1, wi
             """
             
             params = (points, wins, player_name, json.dumps(role_counts), json.dumps(role_wins), guild_id, user_id)
-            await execute_async_query(update_query, params)
-            logger.info(f"Đã cập nhật leaderboard cho {player_name} ({user_id}): {points:+d} điểm, +{wins} thắng")
+            _, affected_rows = await execute_async_query(update_query, params)
+            
+            if affected_rows > 0:
+                logger.info(f"Cập nhật thành công: {player_name} ({user_id}): {points:+d} điểm, {wins:+d} thắng")
+            else:
+                logger.warning(f"Không có dòng nào được cập nhật: {player_name} ({user_id})")
             
         else:
             # Thêm người chơi mới
@@ -467,8 +474,12 @@ async def direct_update_leaderboard(guild_id, user_id, player_name, points=1, wi
             """
             
             params = (guild_id, user_id, player_name, points, wins, json.dumps(role_counts), json.dumps(role_wins))
-            await execute_async_query(insert_query, params)
-            logger.info(f"Đã thêm người chơi mới vào leaderboard: {player_name} ({user_id}): {points:+d} điểm")
+            _, affected_rows = await execute_async_query(insert_query, params)
+            
+            if affected_rows > 0:
+                logger.info(f"Thêm mới thành công: {player_name} ({user_id}): {points:+d} điểm, {wins:+d} thắng")
+            else:
+                logger.warning(f"Không thể thêm mới: {player_name} ({user_id})")
             
         return True
     except Exception as e:
@@ -503,7 +514,7 @@ async def update_leaderboard(guild_id, player_updates):
         # Log chi tiết thông tin cập nhật
         logger.info(f"update_leaderboard: Đang cập nhật cho {len(player_updates)} người chơi trong guild {guild_id}")
         for player_id, data in player_updates.items():
-            logger.info(f"  - Player {player_id}: name={data.get('name', 'Unknown')}, score={data.get('score', 0)}")
+            logger.info(f"  - Player {player_id}: name={data.get('name', 'Unknown')}, score={data.get('score', 0):+d}")
             
         # Thực hiện cập nhật từng người một để tránh lỗi batch
         success_count = 0
@@ -543,7 +554,7 @@ async def update_leaderboard(guild_id, player_updates):
         logger.error(traceback.format_exc())
         return False
 
-async def update_player_stats(guild_id, user_id, player_name, win=False, role=""):
+async def update_player_stats(guild_id, user_id, player_name, win=False, role="", is_alive=True):
     """
     Cập nhật thống kê cho một người chơi
     
@@ -553,6 +564,7 @@ async def update_player_stats(guild_id, user_id, player_name, win=False, role=""
         player_name (str): Tên hiển thị của người chơi
         win (bool): True nếu người chơi thắng
         role (str): Vai trò của người chơi trong game
+        is_alive (bool): True nếu người chơi còn sống khi game kết thúc
     """
     try:
         # Kiểm tra kết nối database
@@ -574,11 +586,16 @@ async def update_player_stats(guild_id, user_id, player_name, win=False, role=""
         if not role or role == "":
             role = "Unknown"
             
-        # Điểm cộng thêm dựa trên kết quả
-        # SỬA ĐỔI: Người thua sẽ bị -1 điểm
-        score_change = 3 if win else -1
+        # Điểm cộng thêm dựa trên kết quả và trạng thái
+        # Win và còn sống: +3 điểm
+        # Win nhưng đã chết: +1 điểm
+        # Thua: -1 điểm
+        if win:
+            score_change = 3 if is_alive else 1
+        else:
+            score_change = -1
         
-        logger.info(f"update_player_stats: Guild {guild_id}, Player {user_id} ({player_name}), Role {role}, Win {win}, Points {score_change}")
+        logger.info(f"update_player_stats: Guild={guild_id}, Player={player_name} ({user_id}), Role={role}, Win={win}, Alive={is_alive}, Points={score_change:+d}")
         
         # Kiểm tra người chơi đã tồn tại chưa
         query_check = """
@@ -674,12 +691,20 @@ async def update_all_player_stats(game_state, winner="no_one"):
     Args:
         game_state (dict): Trạng thái game hiện tại
         winner (str): Phe thắng cuộc ("werewolves", "villagers", "no_one")
+    
+    Returns:
+        bool: True nếu cập nhật thành công, False nếu không
     """
     try:
         # Ghi log chi tiết về tham số đầu vào
         logger.info(f"update_all_player_stats called with winner={winner}")
         logger.info(f"Game state keys: {list(game_state.keys())}")
         
+        # Kiểm tra cờ leaderboard_updated để tránh cập nhật trùng lặp
+        if game_state.get("leaderboard_updated", False):
+            logger.warning("Leaderboard đã được cập nhật trước đó, bỏ qua cập nhật trùng lặp")
+            return True
+            
         # Kiểm tra kết nối
         if not test_database_connection():
             logger.error("Không thể cập nhật player stats: Kết nối cơ sở dữ liệu không khả dụng")
@@ -755,7 +780,8 @@ async def update_all_player_stats(game_state, winner="no_one"):
                 "player_name": player_name, 
                 "points": points,
                 "win": 1 if is_winner else 0,
-                "role": role
+                "role": role,
+                "is_alive": is_alive
             })
                 
         # Thực hiện cập nhật database - dùng phương pháp trực tiếp
@@ -825,6 +851,10 @@ async def update_all_player_stats(game_state, winner="no_one"):
         except Exception as e:
             logger.error(f"Lỗi khi lưu log game: {str(e)}")
             logger.error(traceback.format_exc())
+            
+        # Đánh dấu rằng leaderboard đã được cập nhật
+        game_state["leaderboard_updated"] = True
+        logger.info(f"Đã đánh dấu leaderboard_updated=True để tránh cập nhật trùng lặp")
             
         return True
     
