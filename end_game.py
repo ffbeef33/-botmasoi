@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from constants import AUDIO_FILES, BOT_VERSION
 from utils.api_utils import play_audio
 from views.voting_views import GameEndView
+from db import update_all_player_stats  # Thêm import này
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,43 @@ async def end_game(interaction, game_state, winner="no_one", reason="Game đã k
                 await interaction.followup.send(f"Game đã kết thúc! {reason}")
             except:
                 logger.warning("Không thể gửi response hoặc followup khi kết thúc game")
+                
+        # ===== CẬP NHẬT LEADERBOARD TRƯỚC KHI LÀM BẤT CỨ ĐIỀU GÌ KHÁC =====
+        try:
+            # Chuẩn hóa winner để đảm bảo đúng định dạng
+            normalized_winner = winner
+            if winner == "wolves":
+                normalized_winner = "werewolves"
+            elif winner == "humans":
+                normalized_winner = "villagers"
+                
+            # Sử dụng last_winner từ game_state nếu không có winner được chỉ định
+            if normalized_winner == "no_one":
+                try:
+                    normalized_winner = game_state.last_winner
+                except:
+                    normalized_winner = game_state.get("last_winner", "no_one")
+                    
+            logger.info(f"Cập nhật leaderboard cho game kết thúc với winner: {normalized_winner}")
+            
+            # Kiểm tra nếu leaderboard đã được cập nhật để tránh trùng lặp
+            if game_state.get("leaderboard_updated", False):
+                logger.info("Leaderboard đã được cập nhật trước đó, bỏ qua")
+            else:
+                update_success = await update_all_player_stats(game_state, normalized_winner)
+                if update_success:
+                    logger.info("Cập nhật leaderboard thành công")
+                    text_channel = game_state.get("text_channel") or interaction.channel
+                    if text_channel:
+                        await text_channel.send("🏆 Leaderboard đã được cập nhật!")
+                else:
+                    logger.error("Cập nhật leaderboard thất bại")
+                    
+                # Đánh dấu rằng leaderboard đã được cập nhật để tránh cập nhật lặp lại
+                game_state["leaderboard_updated"] = True
+        except Exception as e:
+            logger.error(f"Lỗi khi cập nhật leaderboard: {str(e)}")
+            traceback.print_exc()
                 
         # Phát âm thanh kết thúc game
         try:
@@ -111,6 +149,38 @@ async def handle_game_end(interaction: discord.Interaction, game_state):
     else:
         logger.warning("Text channel not set, cannot send game ending message")
     
+    # THÊM: Cập nhật leaderboard trước khi reset game state
+    if not game_state.get("leaderboard_updated", False):
+        try:
+            # Lấy thông tin phe thắng từ game_state
+            winner = "no_one"
+            try:
+                winner = game_state.last_winner
+            except:
+                winner = game_state.get("last_winner", "no_one")
+                
+            logger.info(f"Cập nhật leaderboard từ handle_game_end với winner: {winner}")
+            
+            if winner != "no_one":
+                # Cập nhật leaderboard
+                update_success = await update_all_player_stats(game_state, winner)
+                if update_success:
+                    logger.info("Cập nhật leaderboard thành công từ handle_game_end")
+                    # Thông báo cập nhật leaderboard thành công
+                    text_channel = game_state.get("text_channel")
+                    if text_channel:
+                        await text_channel.send("🏆 Leaderboard đã được cập nhật!")
+                else:
+                    logger.error("Cập nhật leaderboard thất bại từ handle_game_end")
+            else:
+                logger.warning("Không xác định được phe thắng cuộc để cập nhật leaderboard")
+                
+            # Đánh dấu rằng leaderboard đã được cập nhật
+            game_state["leaderboard_updated"] = True
+        except Exception as e:
+            logger.error(f"Lỗi khi cập nhật leaderboard từ handle_game_end: {str(e)}")
+            traceback.print_exc()
+    
     # Lưu thông tin setup trước khi reset
     try:
         # Tạo bản sao cụ thể của dữ liệu setup
@@ -123,7 +193,7 @@ async def handle_game_end(interaction: discord.Interaction, game_state):
         except:
             game_state["preserved_setup"] = {
                 "temp_admin_id": game_state.get("temp_admin_id"),
-                "temp_players": game_state.get("temp_players", [])[:],  # Tạo bản sao (thêm dấu phẩy)
+                "temp_players": game_state.get("temp_players", [])[:],  # Tạo bản sao
                 "temp_roles": game_state.get("temp_roles", {}).copy()  # Tạo bản sao
             }
         
@@ -658,6 +728,11 @@ def reset_game_variables(game_state):
         game_state.detective_target2_id = None
         game_state.math_problems.clear() if hasattr(game_state, 'math_problems') else None
         game_state.math_results.clear() if hasattr(game_state, 'math_results') else None
+        
+        # THÊM: Reset cờ liên quan đến leaderboard
+        game_state.leaderboard_updated = False
+        game_state.last_winner = None
+        game_state.summary_already_shown = False
     except:
         game_state["players"] = {}
         game_state["votes"] = {}
@@ -694,6 +769,11 @@ def reset_game_variables(game_state):
         game_state["detective_target2_id"] = None
         game_state["math_problems"] = {}
         game_state["math_results"] = {}
+        
+        # THÊM: Reset cờ liên quan đến leaderboard
+        game_state["leaderboard_updated"] = False
+        game_state["last_winner"] = None
+        game_state["summary_already_shown"] = False
     
     # Khôi phục thông tin tạm thời
     try:
