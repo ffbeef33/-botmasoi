@@ -57,7 +57,7 @@ async def setup_wolf_channel(guild: discord.Guild, game_state):
             title="🐺 Kênh Chat Của Phe Sói",
             description=(
                 "Đây là kênh riêng của phe Sói để thảo luận trong pha đêm.\n"
-                "• Chỉ các thành viên phe Sói và Nhà Ảo Thuật (Illusionist) mới biết kênh này.\n"
+                "• Chỉ các thành viên phe Sói mới biết kênh này.\n"
                 "• Sói thường chọn một mục tiêu chung để giết mỗi đêm.\n"
                 "• Hãy thảo luận và đồng nhất đối tượng để tăng hiệu quả cho phe Sói!"
             ),
@@ -180,19 +180,16 @@ async def start_game_logic(interaction: discord.Interaction, game_state):
             return
     
         try:
-            # Kiểm tra và ngắt kết nối nếu bot đã ở trong kênh voice
-            if game_state.get("voice_connection") and game_state["voice_connection"].is_connected():
-                await game_state["voice_connection"].disconnect()
-                logger.info(f"Bot đã ngắt kết nối khỏi kênh voice cũ: ID={game_state.get('voice_channel_id')}")
-    
-            # Tham gia kênh voice mới
-            try:
-                game_state["voice_connection"] = await voice_channel.connect()
-                logger.info(f"Bot đã tham gia kênh voice: ID={voice_channel.id}, Name={voice_channel.name}")
-            except Exception as e:
-                logger.error(f"Không thể tham gia kênh voice ID={voice_channel.id}: {str(e)}")
+            # Sử dụng voice_manager để kết nối
+            from main import voice_manager
+            voice_client = await voice_manager.connect_to_voice(voice_channel, guild.id)
+            if not voice_client:
+                logger.error(f"Không thể tham gia kênh voice ID={voice_channel.id}")
                 await text_channel.send(f"Lỗi: Không thể tham gia kênh voice {voice_channel.name}.")
                 return
+                
+            game_state["voice_connection"] = voice_client
+            logger.info(f"Bot đã tham gia kênh voice: ID={voice_channel.id}, Name={voice_channel.name}")
     
             # Tạo vai trò Discord
             villager_role = await guild.create_role(
@@ -304,7 +301,7 @@ async def start_game_logic(interaction: discord.Interaction, game_state):
                 ),
                 color=discord.Color.blue()
             )
-            start_embed.set_image(url="https://cdn.discordapp.com/attachments/1365707789321633813/1377490486498951241/Banner_early_acccess_Recovered.png?ex=6839277c&is=6837d5fc&hm=f3451388485840264aa9207a07f9a1579a1cc9038baa46e0b3aaeecb1998279f&")  # Thêm URL của ảnh banner
+            start_embed.set_image(url="https://cdn.discordapp.com/attachments/1365707789321633813/1377490486498951241/Banner_early_acccess_Recovered.png")
             start_embed.set_footer(text=BOT_VERSION)
             await game_state["text_channel"].send(embed=start_embed)
             
@@ -455,11 +452,15 @@ async def start_new_game_with_same_setup(interaction: discord.Interaction, game_
         
         # Nếu tất cả người chơi có mặt, tiếp tục khởi động game mới
         try:
-            # Bot tham gia lại kênh voice
-            if game_state.get("voice_connection") and game_state["voice_connection"].is_connected():
-                await game_state["voice_connection"].disconnect()
-            
-            game_state["voice_connection"] = await voice_channel.connect()
+            # Sử dụng voice_manager để kết nối bot vào kênh voice
+            from main import voice_manager
+            voice_client = await voice_manager.connect_to_voice(voice_channel, guild.id)
+            if not voice_client:
+                logger.error(f"Không thể tham gia kênh voice ID={voice_channel.id}")
+                await text_channel.send(f"Lỗi: Không thể tham gia kênh voice {voice_channel.name}.")
+                return
+                
+            game_state["voice_connection"] = voice_client
             logger.info(f"Bot joined voice channel: ID={voice_channel.id}, Name={voice_channel.name}")
         except Exception as e:
             logger.error(f"Failed to join voice channel ID={voice_channel.id}: {str(e)}")
