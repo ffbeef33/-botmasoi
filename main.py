@@ -9,8 +9,9 @@ import traceback
 import asyncio
 from discord.ext import commands
 
-from config import DISCORD_TOKEN, logger
+from config import DISCORD_TOKEN, logger, game_states
 from db import init_database
+from utils.voice_manager import VoiceManager
 
 # Khởi tạo bot với các intents cần thiết
 intents = discord.Intents.default()
@@ -23,6 +24,7 @@ intents.guilds = True
 COMMANDS_SYNCED = False
 
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None)
+voice_manager = VoiceManager(bot)
 
 @bot.event
 async def on_ready():
@@ -64,6 +66,10 @@ async def on_ready():
             name="Ma Sói | /help_masoi"
         )
     )
+    
+    # Thêm liên kết đến game_states cho voice_manager
+    voice_manager.set_game_states_reference(game_states)
+    logger.info("Voice Manager đã được khởi tạo với game_states")
 
 @bot.event
 async def on_guild_join(guild):
@@ -95,18 +101,8 @@ async def on_guild_join(guild):
 @bot.event
 async def on_voice_state_update(member, before, after):
     """Event được gọi khi trạng thái voice của người dùng thay đổi"""
-    # Nếu bot đang trong kênh voice và không còn người nào khác, bot sẽ rời kênh
-    if before.channel and bot.user in before.channel.members:
-        # Đếm số người trong kênh (trừ bot)
-        human_count = sum(1 for m in before.channel.members if not m.bot)
-        
-        if human_count == 0:
-            # Tìm voice client trong kênh này
-            for vc in bot.voice_clients:
-                if vc.channel == before.channel:
-                    logger.info(f"Disconnecting from empty voice channel: {before.channel.name}")
-                    await vc.disconnect()
-                    break
+    # Sử dụng voice_manager để xử lý
+    await voice_manager.handle_voice_state_update(member, before, after)
 
 @bot.event
 async def on_command_error(ctx, error):
