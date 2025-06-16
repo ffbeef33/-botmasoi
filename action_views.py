@@ -151,10 +151,30 @@ class NightActionSelect(discord.ui.Select):
                 
             self.game_state["illusionist_effect_night"] = self.game_state["night_count"] + 1
             self.game_state["illusionist_scanned"] = True
-            
+        
+        # XỬ LÝ WOLFMAN THEO LOGIC MỚI
+        elif target_role == "Wolfman":
+            if self.game_state["illusionist_effect_active"]:
+                # Nếu tiên tri bị ảo giác: Wolfman hiện là phe Sói
+                embed = discord.Embed(
+                    title="🔮 Kết quả Soi",
+                    description=f"Người chơi **{target_name}** thuộc **Phe Sói**!",
+                    color=discord.Color.red()
+                )
+                logger.info(f"Seer scanned Wolfman {target_id} ({target_name}), showing as Werewolf due to illusion effect")
+            else:
+                # Nếu tiên tri không bị ảo giác: Wolfman hiện là phe Dân
+                embed = discord.Embed(
+                    title="🔮 Kết quả Soi",
+                    description=f"Người chơi **{target_name}** thuộc **Phe Dân**!",
+                    color=discord.Color.green()
+                )
+                logger.info(f"Seer scanned Wolfman {target_id} ({target_name}), showing as Villager (no illusion effect)")
+                
         else:
             # Xác định kết quả thực tế với hiệu ứng Illusionist (nếu có)
-            is_werewolf_team = target_role in ["Werewolf", "Demon Werewolf", "Assassin Werewolf"] or (target_role == "Wolfman" and not self.game_state["illusionist_effect_active"])
+            # Loại bỏ Wolfman khỏi danh sách này vì đã xử lý riêng ở trên
+            is_werewolf_team = target_role in ["Werewolf", "Demon Werewolf", "Assassin Werewolf"]
             
             # Đảo ngược kết quả nếu hiệu ứng Illusionist đang hoạt động
             if self.game_state["illusionist_effect_active"]:
