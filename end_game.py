@@ -321,59 +321,81 @@ async def send_game_summary(interaction, game_state, guild_id):
         # Tạo summary từ logs và trạng thái game
         from db import get_game_logs
         
-        embed = discord.Embed(title="Kết Quả Game", color=discord.Color.blue())
+        embed = discord.Embed(title="Kết Quả Game", color=discord.Color.gold())
         
         # Lấy logs và xử lý đúng định dạng
         try:
             game_logs = await get_game_logs(guild_id)
             
             # Hiển thị logs nếu có
-            if game_logs:
-                # Xử lý dữ liệu log từ định dạng dict
-                log_entries = []
-                for log_entry in game_logs[:10]:  # Lấy 10 log gần nhất
-                    # Log có thể là dictionary với cấu trúc khác nhau
-                    if isinstance(log_entry, dict):
-                        if "players_data" in log_entry:
-                            log_entries.append(str(log_entry.get("players_data", "")))
-                        else:
-                            # Cố gắng tạo dòng log từ các trường khả dụng
-                            timestamp = log_entry.get("timestamp", "")
-                            winner = log_entry.get("winner", "")
-                            log_entries.append(f"{timestamp}: {winner}")
-                    else:
-                        log_entries.append(str(log_entry))
+            if game_logs and len(game_logs) > 0:
+                # Định dạng logs để hiển thị dễ đọc hơn
+                formatted_logs = []
+                for i, log in enumerate(game_logs[-10:]):  # Chỉ lấy 10 log gần nhất
+                    if isinstance(log, str):
+                        formatted_logs.append(log)
+                    elif isinstance(log, dict):
+                        # Xử lý log dạng dict
+                        if "message" in log:
+                            formatted_logs.append(log["message"])
+                        elif "timestamp" in log:
+                            time_str = log.get("timestamp", "")
+                            action = log.get("action", "")
+                            desc = log.get("description", "")
+                            if action and desc:
+                                formatted_logs.append(f"{action}: {desc}")
+                            elif action:
+                                formatted_logs.append(action)
+                            else:
+                                formatted_logs.append(time_str)
                 
-                if log_entries:
+                if formatted_logs:
                     embed.add_field(
                         name="Diễn biến", 
-                        value="\n".join(log_entries) or "Không có dữ liệu chi tiết", 
+                        value="\n".join(formatted_logs), 
                         inline=False
                     )
                 else:
-                    embed.add_field(name="Diễn biến", value="Không có dữ liệu", inline=False)
+                    embed.add_field(name="Diễn biến", value="Không có dữ liệu chi tiết", inline=False)
             else:
                 embed.add_field(name="Diễn biến", value="Không có dữ liệu game logs", inline=False)
         except Exception as log_error:
             logger.error(f"Error processing game logs: {str(log_error)}")
-            embed.add_field(name="Diễn biến", value=f"Lỗi khi tải logs: {str(log_error)[:100]}", inline=False)
+            embed.add_field(name="Diễn biến", value="Không thể tải logs game", inline=False)
         
         # Hiển thị vai trò và trạng thái người chơi
         try:
-            role_list = []
-            for user_id, data in game_state.get("players", {}).items():
-                member = game_state.get("member_cache", {}).get(user_id)
-                if member:
-                    status = "Sống" if data.get("status") == "alive" else "Bị thương" if data.get("status") == "wounded" else "Chết"
-                    role_list.append(f"{member.display_name}: {data.get('role', 'Unknown')} ({status})")
-            
-            if role_list:
-                embed.add_field(name="Người chơi", value="\n".join(role_list), inline=False)
+            players = game_state.get("players", {})
+            if players:
+                player_list = []
+                for user_id, data in players.items():
+                    member = game_state.get("member_cache", {}).get(user_id)
+                    name = member.display_name if member else data.get("name", "Không xác định")
+                    role = data.get("role", "Không xác định")
+                    status_code = data.get("status", "unknown")
+                    
+                    # Chuyển đổi status code sang text dễ đọc
+                    if status_code == "alive":
+                        status_text = "Sống"
+                    elif status_code == "wounded":
+                        status_text = "Bị thương"
+                    elif status_code == "dead":
+                        status_text = "Chết"
+                    else:
+                        status_text = "Không xác định"
+                    
+                    player_list.append(f"{name}: {role} ({status_text})")
+                
+                embed.add_field(
+                    name="Người chơi", 
+                    value="\n".join(player_list),
+                    inline=False
+                )
             else:
-                embed.add_field(name="Người chơi", value="Không có dữ liệu", inline=False)
+                embed.add_field(name="Người chơi", value="Không có dữ liệu người chơi", inline=False)
         except Exception as player_error:
             logger.error(f"Error processing player data: {str(player_error)}")
-            embed.add_field(name="Người chơi", value="Lỗi khi hiển thị thông tin người chơi", inline=False)
+            embed.add_field(name="Người chơi", value="Lỗi hiển thị thông tin người chơi", inline=False)
         
         # Hiển thị số đêm và thống kê khác
         try:
@@ -381,10 +403,26 @@ async def send_game_summary(interaction, game_state, guild_id):
                 f"Số đêm: {game_state.get('night_count', 0)}",
                 f"Số người chơi: {len(game_state.get('players', {}))}"
             ]
-            embed.add_field(name="Thống kê", value="\n".join(stats), inline=False)
+            
+            # Xác định đội thắng
+            winner = game_state.get("last_winner", "no_one")
+            if winner == "werewolves":
+                winner_text = "Phe Sói Thắng"
+            elif winner == "villagers":
+                winner_text = "Phe Dân Làng Thắng"
+            else:
+                winner_text = "Không có bên nào thắng"
+                
+            stats.append(f"Kết quả: {winner_text}")
+            
+            embed.add_field(
+                name="Thống kê",
+                value="\n".join(stats),
+                inline=False
+            )
         except Exception as stats_error:
             logger.error(f"Error processing game stats: {str(stats_error)}")
-            embed.add_field(name="Thống kê", value="Lỗi khi hiển thị thống kê", inline=False)
+            embed.add_field(name="Thống kê", value="Lỗi hiển thị thống kê", inline=False)
         
         # Footer có thể gây lỗi nếu interaction.user là None
         try:
@@ -394,6 +432,7 @@ async def send_game_summary(interaction, game_state, guild_id):
             embed.set_footer(text=f"Log kết quả game | {BOT_VERSION}")
         
         await text_channel.send(embed=embed)
+        
     except Exception as e:
         logger.error(f"Error sending game summary: {str(e)}")
         try:
