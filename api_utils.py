@@ -225,27 +225,57 @@ async def get_all_members(guild):
 
 async def play_audio(file_path, voice_connection):
     """
-    Phát âm thanh trong kênh voice
+    Phát âm thanh trong kênh voice với xử lý lỗi tốt hơn
     
     Args:
         file_path (str): Đường dẫn đến file âm thanh
         voice_connection (discord.VoiceClient): Kết nối voice
+        
+    Returns:
+        bool: True nếu thành công, False nếu thất bại
     """
-    if voice_connection and voice_connection.is_connected():
-        try:
-            # Ngừng phát âm thanh nếu đang phát
-            if voice_connection.is_playing():
-                voice_connection.stop()
+    if not voice_connection:
+        logger.error("Voice connection is None, cannot play audio")
+        return False
+        
+    try:
+        # Kiểm tra kết nối còn nguyên vẹn không
+        if not voice_connection.is_connected():
+            logger.warning("Voice connection is not connected, cannot play audio")
+            # Thử lấy tham chiếu đến VoiceManager để kết nối lại
+            try:
+                from main import voice_manager
+                if voice_manager and voice_connection.channel:
+                    guild_id = voice_connection.channel.guild.id
+                    await voice_manager._attempt_reconnect(guild_id)
+                    # Cập nhật lại voice_connection với phiên bản mới
+                    if guild_id in voice_manager.voice_connections:
+                        voice_connection = voice_manager.voice_connections[guild_id]
+                    else:
+                        return False
+            except ImportError:
+                logger.warning("Cannot import voice_manager, reconnection not attempted")
+                return False
                 
-            audio_source = discord.FFmpegPCMAudio(file_path)
-            voice_connection.play(audio_source)
-            # Không chờ âm thanh phát xong để tiếp tục xử lý
-            return True
-        except FileNotFoundError:
-            logger.error(f"Không tìm thấy file âm thanh: {file_path}")
-        except Exception as e:
-            logger.error(f"Lỗi khi phát âm thanh {file_path}: {str(e)}")
-            traceback.print_exc()
+        # Ngừng phát âm thanh nếu đang phát
+        if voice_connection.is_playing():
+            voice_connection.stop()
+            
+        # Thêm xử lý lỗi cụ thể hơn
+        audio_source = discord.FFmpegPCMAudio(file_path)
+        voice_connection.play(
+            audio_source,
+            after=lambda error: logger.error(f"Audio playback error: {error}") if error else None
+        )
+        return True
+        
+    except FileNotFoundError:
+        logger.error(f"Audio file not found: {file_path}")
+    except discord.errors.ClientException as e:
+        logger.error(f"Discord client error when playing audio: {e}")
+    except Exception as e:
+        logger.error(f"General error playing audio {file_path}: {e}")
+        traceback.print_exc()
     
     return False
 
