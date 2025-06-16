@@ -28,6 +28,12 @@ async def morning_phase(interaction: discord.Interaction, game_state):
     game_state["phase"] = "morning"
     game_state["votes"].clear()  # Xóa phiếu bầu từ ngày trước
     
+    # Reset trạng thái vote skip nếu có
+    game_state["skip_vote_active"] = False
+    
+    # Lưu lại các thông tin quan trọng cho pha hiện tại
+    game_state["current_phase_start_time"] = asyncio.get_event_loop().time()
+    
     # Lấy và kiểm tra các kênh cần thiết
     main_channel = interaction.client.get_channel(game_state["voice_channel_id"])
     text_channel = game_state.get("text_channel")
