@@ -279,6 +279,13 @@ async def start_game_logic(interaction: discord.Interaction, game_state):
             game_state["demon_werewolf_has_cursed"] = False
             game_state["demon_werewolf_cursed_this_night"] = False
             
+            # THÊM: Reset cờ liên quan đến leaderboard khi bắt đầu game mới
+            game_state["leaderboard_updated"] = False
+            game_state["last_winner"] = None
+            game_state["summary_already_shown"] = False
+            
+            logger.info("Reset leaderboard flags at game start: leaderboard_updated=False, last_winner=None")
+            
             # Phân vai cho người chơi và gửi tin nhắn
             await assign_random_roles(game_state, guild)
             
@@ -292,7 +299,6 @@ async def start_game_logic(interaction: discord.Interaction, game_state):
                     f"**🔹 Các vai trò trong game: {role_list_str}**\n"
                     "**🔹 Tất cả người chơi đã được gán vai trò.**\n"
                     "**🔹 Kênh wolf-chat và dead-chat đã được thiết lập.**\n"
-                    "**🔹 Hãy kiểm tra tin nhắn DM để biết vai trò của bạn.**\n"
                     "**🔹 Hãy kiểm tra tin nhắn DM để biết vai trò của bạn.**\n"
                     "**🔹 Chuẩn bị cho pha ngày đầu tiên!**"
                 ),
@@ -392,6 +398,15 @@ async def start_new_game_with_same_setup(interaction: discord.Interaction, game_
         
         # Reset game state và lưu lại những thông tin cần thiết
         game_state.reset()
+        
+        # THÊM: Đảm bảo cờ leaderboard được reset
+        try:
+            game_state["leaderboard_updated"] = False
+            game_state["last_winner"] = None
+            game_state["summary_already_shown"] = False
+            logger.info("Reset leaderboard flags for new game with same setup")
+        except Exception as e:
+            logger.error(f"Error resetting leaderboard flags: {str(e)}")
         
         # Gán lại các thông tin quan trọng
         game_state["temp_players"] = temp_players
@@ -515,8 +530,16 @@ class ContinueWithMissingPlayersView(discord.ui.View):
             
             # Reset game state triệt để hơn
             self.game_state.reset()
+            
+            # THÊM: Đảm bảo cờ leaderboard được reset sau khi hủy game
+            self.game_state["leaderboard_updated"] = False
+            self.game_state["last_winner"] = None
+            self.game_state["summary_already_shown"] = False
+            
             self.game_state["temp_players"] = []
             self.game_state["temp_roles"] = {}
+            
+            logger.info("Game cancelled and all state reset including leaderboard flags")
         except Exception as e:
             logger.error(f"Error in cancel_button: {str(e)}")
             await interaction.channel.send(f"Lỗi khi hủy game: {str(e)}")
