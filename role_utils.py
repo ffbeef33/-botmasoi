@@ -79,14 +79,14 @@ async def assign_random_roles(game_state, guild):
         # Thực hiện các thao tác role Discord song song
         tasks.append(asyncio.gather(*role_tasks))
         
-        # CẢI THIỆN: Gửi thông báo vai trò qua DM với embed đẹp hơn
+        # Tạo embed thông báo vai trò (chỉ giữ lại phần này)
         role_icon_url = ROLE_ICONS.get(role, "https://example.com/default_icon.png")
         role_link = ROLE_LINKS.get(role, "")
         
         embed = discord.Embed(
             title="Vai Trò Của Bạn",
             description=f"Bạn đã được phân vai: **{role}**",
-            color=discord.Color.blue()
+            color=discord.Color.blue() if get_player_team(role) == "villagers" else discord.Color.red()
         )
         
         # Thêm mô tả vai trò
@@ -106,10 +106,16 @@ async def assign_random_roles(game_state, guild):
         # Thêm footer với thông tin bổ sung
         embed.set_footer(text="Ma Sói | Giữ bí mật vai trò của bạn!")
         
+        # Gửi thông báo vai trò qua DM
         tasks.append(retry_api_call(lambda m=member, e=embed: m.send(embed=e)))
         
-        # Gửi hướng dẫn bổ sung cho vai trò cụ thể
-        await send_role_instructions(member, role, game_state)
+        # Bỏ phần gửi hướng dẫn bổ sung
+        # Dòng này đã bị xóa: await send_role_instructions(member, role, game_state)
+        
+        # Khởi tạo biến trạng thái đặc biệt cho một số vai trò
+        if role == "Explorer":
+            game_state["explorer_id"] = member.id
+            game_state["explorer_can_act"] = True
     
     # Đợi tất cả các tác vụ hoàn thành
     await asyncio.gather(*tasks)
@@ -136,9 +142,11 @@ async def assign_random_roles(game_state, guild):
         
         await wolf_channel.send(embed=embed)
 
+# Giữ lại hàm send_role_instructions nhưng không gọi nó
+# Hàm này giữ lại để tham khảo hoặc để sau này có thể sử dụng lại nếu cần
 async def send_role_instructions(member, role, game_state):
     """
-    Gửi hướng dẫn cụ thể cho vai trò
+    Gửi hướng dẫn cụ thể cho vai trò (KHÔNG SỬ DỤNG)
     
     Args:
         member (discord.Member): Thành viên cần gửi
