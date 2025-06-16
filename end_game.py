@@ -218,13 +218,22 @@ async def handle_game_end(interaction: discord.Interaction, game_state):
     await asyncio.sleep(2)
     
     # Bot rời kênh voice sau khi phát âm thanh
-    if game_state["voice_connection"] and game_state["voice_connection"].is_connected():
-        try:
-            await game_state["voice_connection"].disconnect()
-            logger.info(f"Bot disconnected from voice channel: ID={game_state['voice_channel_id']}")
-        except Exception as e:
-            logger.error(f"Failed to disconnect from voice channel ID={game_state['voice_channel_id']}: {str(e)}")
+    try:
+        from main import voice_manager
+        guild_id = interaction.guild.id
+        await voice_manager.disconnect(guild_id)
         game_state["voice_connection"] = None
+        logger.info(f"Bot đã ngắt kết nối voice từ guild ID={guild_id}")
+    except Exception as e:
+        logger.error(f"Lỗi khi ngắt kết nối voice: {str(e)}")
+        # Thử phương pháp thay thế nếu voice_manager gặp lỗi
+        if game_state["voice_connection"] and game_state["voice_connection"].is_connected():
+            try:
+                await game_state["voice_connection"].disconnect()
+                logger.info(f"Bot disconnected from voice channel using fallback: ID={game_state['voice_channel_id']}")
+            except Exception as e2:
+                logger.error(f"Failed to disconnect using fallback: {str(e2)}")
+            game_state["voice_connection"] = None
     
     if game_state["text_channel"] is not None:
         await game_state["text_channel"].send("Game đã kết thúc. Chọn hành động tiếp theo:", 
