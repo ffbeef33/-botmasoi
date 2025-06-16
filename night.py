@@ -513,34 +513,20 @@ async def process_night_action_results(interaction: discord.Interaction, game_st
             target_id = game_state["witch_target_save_id"]
             if target_id in game_state["players"] and game_state["players"][target_id]["status"] in ["alive", "wounded"]:
                 target_data = game_state["players"][target_id]
-                logger.info(f"Witch saving player: target_id={target_id}, current status={target_data['status']}")
-                
-                # FIX: Luôn giữ nguyên trạng thái wounded nếu đã bị thương
                 current_status = target_data["status"]
+                logger.info(f"Witch saving player: target_id={target_id}, current status={current_status}")
                 
-                # Kiểm tra nếu là Tough Guy và sẽ chết
+                # ===== SỬA LỖI: PHẦN XỬ LÝ TOUGH GUY =====
+                # Nếu đây là Tough Guy, luôn đặt trạng thái thành "wounded" sau khi cứu
                 if target_data["role"] == "Tough Guy":
-                    count = 0
-                    # Đếm số hành động giết nhắm vào Tough Guy
-                    if game_state["werewolf_target_id"] == target_id and not game_state["demon_werewolf_cursed_this_night"]:
-                        count += 1
-                    if game_state["hunter_target_id"] == target_id:
-                        count += 1
-                    if game_state["explorer_target_id"] == target_id:
-                        count += 1
-                        
-                    if (current_status == "alive" and count >= 2) or (current_status == "wounded" and count >= 1):
-                        # FIX: Giữ nguyên trạng thái wounded nếu đã wounded
-                        if current_status == "wounded":
-                            # Không thay đổi trạng thái
-                            logger.info(f"Witch saved Tough Guy but kept wounded status: target_id={target_id}")
-                        else:
-                            # Nếu đang alive, chuyển sang wounded do đủ điều kiện chết
-                            target_data["status"] = "wounded"
-                            logger.info(f"Witch saved Tough Guy: target_id={target_id}, status set to wounded from alive")
-                    else:
-                        # FIX: Giữ nguyên trạng thái, không thay đổi
-                        logger.info(f"Witch saved Tough Guy with no status change needed: target_id={target_id}, status={current_status}")
+                    # Mặc định đặt thành "wounded" bất kể ban đầu là "alive" hay "wounded" 
+                    target_data["status"] = "wounded"
+                    logger.info(f"FIXED: Tough Guy saved by Witch, explicitly set to wounded: target_id={target_id}")
+                else:
+                    # Các vai trò khác vẫn giữ nguyên hành vi cũ
+                    # Người được cứu sẽ giữ status "alive" hoặc "wounded" như hiện tại
+                    logger.info(f"Regular player saved: target_id={target_id}, status unchanged: {current_status}")
+                # ============================================
                 
                 # Hủy các hành động giết
                 if game_state["werewolf_target_id"] == target_id:
