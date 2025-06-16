@@ -17,6 +17,7 @@ from phases.morning import morning_phase
 from phases.night import night_phase
 from phases.voting import voting_phase
 from utils.api_utils import update_member_cache
+from views.skip_phase_view import SkipPhaseView
 
 logger = logging.getLogger(__name__)
 
@@ -466,6 +467,60 @@ class GameCommands(commands.Cog):
             embed.description = "Không có người chơi nào đang bị mute."
         
         await interaction.followup.send(embed=embed)
+
+    @discord.app_command.command(name="skip_phase", description="Bỏ qua pha thảo luận và chuyển thẳng sang pha bỏ phiếu")
+    async def skip_phase_command(self, interaction: discord.Interaction):
+        """Command cho phép bỏ qua pha thảo luận nếu đủ số người đồng ý"""
+        
+        # Kiểm tra game có đang chạy không
+        guild_id = interaction.guild.id
+        if guild_id not in self.game_states or not self.game_states[guild_id].get("is_game_running"):
+            await interaction.response.send_message("Không có game nào đang chạy!", ephemeral=True)
+            return
+            
+        game_state = self.game_states[guild_id]
+        
+        # Kiểm tra đang ở pha sáng không
+        if game_state.get("phase") != "morning":
+            await interaction.response.send_message("Lệnh này chỉ hoạt động trong pha thảo luận sáng!", ephemeral=True)
+            return
+            
+        # Kiểm tra người gọi lệnh có phải là người chơi đang sống không
+        user_id = interaction.user.id
+        if user_id not in game_state.get("players", {}):
+            await interaction.response.send_message("Bạn không phải là người chơi trong game!", ephemeral=True)
+            return
+            
+        if game_state["players"][user_id]["status"] != "alive":
+            await interaction.response.send_message("Chỉ người chơi còn sống mới có thể sử dụng lệnh này!", ephemeral=True)
+            return
+            
+        # Kiểm tra xem đã có vote skip nào đang diễn ra không
+        if game_state.get("skip_vote_active"):
+            await interaction.response.send_message("Đã có một vote bỏ qua pha thảo luận đang diễn ra!", ephemeral=True)
+            return
+            
+        # Bắt đầu vote bỏ qua pha thảo luận
+        try:
+            game_state["skip_vote_active"] = True
+            
+            # Tạo view và bắt đầu vote
+            view = SkipPhaseView(interaction, game_state)
+            await view.start_vote()
+            
+            # Khi vote kết thúc, reset trạng thái
+            def reset_skip_vote():
+                game_state["skip_vote_active"] = False
+                
+            # Đặt callback khi view đóng
+            view.on_timeout = lambda: reset_skip_vote()
+        except Exception as e:
+            logger.error(f"Lỗi khi bắt đầu vote skip phase: {str(e)}")
+            game_state["skip_vote_active"] = False
+            if interaction.response.is_done():
+                await interaction.followup.send(f"Lỗi khi thực hiện lệnh: {str(e)}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"Lỗi khi thực hiện lệnh: {str(e)}", ephemeral=True)
 
 async def setup(bot):
     try:
