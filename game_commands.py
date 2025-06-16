@@ -468,7 +468,8 @@ class GameCommands(commands.Cog):
         
         await interaction.followup.send(embed=embed)
 
-    @discord.app_command.command(name="skip_phase", description="Bỏ qua pha thảo luận và chuyển thẳng sang pha bỏ phiếu")
+    @app_command.command(name="skip_phase", description="Bỏ qua pha thảo luận và chuyển thẳng sang pha bỏ phiếu")
+    @handle_interaction
     async def skip_phase_command(self, interaction: discord.Interaction):
         """Command cho phép bỏ qua pha thảo luận nếu đủ số người đồng ý"""
         
