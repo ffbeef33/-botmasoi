@@ -4,11 +4,12 @@
 import discord
 import logging
 import asyncio
+import traceback
 from typing import Dict, List, Optional, Tuple
 
-from constants import GIF_URLS, AUDIO_FILES
+from constants import GIF_URLS, AUDIO_FILES, WEREWOLF_ROLES  # Thêm import WEREWOLF_ROLES
 from utils.api_utils import play_audio, countdown, safe_send_message
-from db import update_leaderboard
+from db import update_leaderboard, update_all_player_stats  # Thêm import update_all_player_stats
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,9 @@ async def voting_phase(interaction: discord.Interaction, game_state):
         # Kiểm tra điều kiện thắng sau khi xử lý phiếu
         win_team = await check_win_condition(interaction, game_state)
         if win_team:
+            # Lưu thông tin phe thắng cuộc để sử dụng trong end_game
+            game_state["last_winner"] = win_team
+            
             # Cập nhật leaderboard khi kết thúc game
             await update_leaderboard_from_game(interaction, game_state, win_team)
             return
@@ -98,7 +102,6 @@ async def voting_phase(interaction: discord.Interaction, game_state):
     
     except Exception as e:
         logger.error(f"Error in voting_phase: {str(e)}")
-        import traceback
         traceback.print_exc()
         if text_channel:
             await text_channel.send(f"Đã xảy ra lỗi trong pha bỏ phiếu: {str(e)[:100]}...")
@@ -164,7 +167,6 @@ async def display_current_votes(interaction: discord.Interaction, game_state):
         await text_channel.send(embed=embed)
     except Exception as e:
         logger.error(f"Error displaying current votes: {str(e)}")
-        import traceback
         traceback.print_exc()
 
 async def display_final_votes(interaction: discord.Interaction, game_state):
@@ -219,7 +221,6 @@ async def display_final_votes(interaction: discord.Interaction, game_state):
         await text_channel.send(embed=embed)
     except Exception as e:
         logger.error(f"Error displaying final votes: {str(e)}")
-        import traceback
         traceback.print_exc()
 
 def count_votes(game_state) -> Tuple[Dict[int, int], int, int]:
@@ -379,6 +380,9 @@ async def check_win_condition(interaction: discord.Interaction, game_state):
             # Đánh dấu đã hiển thị thông báo tóm tắt để tránh hiển thị lần nữa
             game_state["summary_already_shown"] = True
             
+            # Lưu thông tin về phe thắng để sử dụng sau này
+            game_state["last_winner"] = "villagers"
+            
         logger.info(f"Villagers win! (Werewolves: {werewolf_count}, Villagers: {villager_count})")
         
         # Kết thúc game
@@ -402,6 +406,9 @@ async def check_win_condition(interaction: discord.Interaction, game_state):
             
             # Đánh dấu đã hiển thị thông báo tóm tắt để tránh hiển thị lần nữa
             game_state["summary_already_shown"] = True
+            
+            # Lưu thông tin về phe thắng để sử dụng sau này
+            game_state["last_winner"] = "werewolves"
             
         logger.info(f"Werewolves win! (Werewolves: {werewolf_count}, Villagers: {villager_count})")
         
@@ -464,38 +471,91 @@ async def send_game_analysis(interaction: discord.Interaction, game_state, winni
 
 async def update_leaderboard_from_game(interaction: discord.Interaction, game_state, winning_team):
     """
-    Cập nhật leaderboard từ kết quả game
+    Cập nhật leaderboard từ kết quả game - Sử dụng cả hai phương pháp để đảm bảo dữ liệu được cập nhật
     
     Args:
         interaction (discord.Interaction): Interaction gốc
         game_state (dict): Trạng thái game hiện tại
         winning_team (str): "villagers" hoặc "werewolves"
     """
-    guild_id = interaction.guild.id
-    player_updates = {}
-    
-    for user_id, data in game_state["players"].items():
-        member = game_state["member_cache"].get(user_id)
-        if not member:
-            continue
-            
-        # Xác định điểm thưởng dựa trên kết quả
-        player_team = "werewolves" if data["role"] in WEREWOLF_ROLES else "villagers"
-        
-        # Tính toán điểm thưởng
-        score_increment = 3 if (player_team == winning_team and data["status"] in ["alive", "wounded"]) else \
-                          1 if (player_team == winning_team) else -1
-                          
-        player_updates[user_id] = {
-            "name": member.display_name,
-            "score": score_increment
-        }
-    
-    # Cập nhật leaderboard trong database
     try:
-        from db import update_leaderboard
-        success = await update_leaderboard(guild_id, player_updates)
-        if success and game_state["text_channel"]:
-            await game_state["text_channel"].send("🏆 Leaderboard đã được cập nhật!")
+        # Thiết lập cờ để tránh cập nhật nhiều lần
+        if game_state.get("leaderboard_updated", False):
+            logger.info("Leaderboard đã được cập nhật trước đó, bỏ qua")
+            return
+            
+        logger.info(f"Bắt đầu cập nhật leaderboard với phe thắng: {winning_team}")
+        
+        # Phương pháp 1: Sử dụng update_all_player_stats (đáng tin cậy hơn)
+        try:
+            logger.info("Đang cập nhật leaderboard bằng update_all_player_stats...")
+            result = await update_all_player_stats(game_state, winning_team)
+            if result:
+                logger.info("Cập nhật leaderboard thành công với update_all_player_stats")
+                game_state["leaderboard_updated"] = True
+                if game_state["text_channel"]:
+                    await game_state["text_channel"].send("🏆 Leaderboard đã được cập nhật!")
+                return
+            else:
+                logger.warning("update_all_player_stats trả về False, thử phương pháp khác")
+        except Exception as e:
+            logger.error(f"Lỗi khi sử dụng update_all_player_stats: {str(e)}")
+            traceback.print_exc()
+        
+        # Phương pháp 2: Sử dụng update_leaderboard - phương pháp backup
+        guild_id = interaction.guild.id
+        player_updates = {}
+        
+        for user_id, data in game_state["players"].items():
+            # Đảm bảo user_id là int
+            user_id_int = int(user_id)
+            
+            member = game_state["member_cache"].get(user_id_int) or game_state["member_cache"].get(str(user_id_int))
+            
+            if not member:
+                logger.warning(f"Không tìm thấy member cho user_id {user_id_int} trong cache")
+                continue
+                
+            # Xác định vai trò và điểm thưởng
+            is_werewolf = data["role"] in WEREWOLF_ROLES
+            player_team = "werewolves" if is_werewolf else "villagers"
+            
+            # SỬA ĐỔI: Kiểm tra trạng thái người chơi
+            is_alive = data["status"] in ["alive", "wounded"]
+            
+            # SỬA ĐỔI: Logic tính điểm mới
+            if player_team == winning_team:
+                score_increment = 3 if is_alive else 1
+            else:
+                score_increment = -1  # Phe thua luôn -1 điểm
+                              
+            player_updates[user_id_int] = {
+                "name": member.display_name,
+                "score": score_increment
+            }
+            
+            # Ghi log chi tiết
+            logger.debug(f"Chuẩn bị cập nhật điểm cho {member.display_name} ({user_id_int}): +{score_increment} điểm (Team: {player_team}, Win: {player_team == winning_team}, Alive: {is_alive})")
+        
+        # Cập nhật leaderboard trong database
+        try:
+            logger.info(f"Đang cập nhật leaderboard cho {len(player_updates)} người chơi...")
+            success = await update_leaderboard(guild_id, player_updates)
+            
+            if success:
+                logger.info("Cập nhật leaderboard thành công với update_leaderboard")
+                game_state["leaderboard_updated"] = True
+                if game_state["text_channel"]:
+                    await game_state["text_channel"].send("🏆 Leaderboard đã được cập nhật!")
+                return True
+            else:
+                logger.warning("Cập nhật leaderboard thất bại với update_leaderboard")
+        except Exception as e:
+            logger.error(f"Lỗi khi cập nhật leaderboard với update_leaderboard: {str(e)}")
+            traceback.print_exc()
+            
+        return False
     except Exception as e:
-        logger.error(f"Error updating leaderboard: {str(e)}")
+        logger.error(f"Lỗi tổng thể khi cập nhật leaderboard: {str(e)}")
+        traceback.print_exc()
+        return False
