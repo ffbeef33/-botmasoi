@@ -6,7 +6,8 @@ import logging
 import asyncio
 from typing import Dict, Set, Optional
 
-from phases.voting import start_voting_phase
+# Sửa import này
+from phases.voting import voting_phase  # Thay vì start_voting_phase
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +118,10 @@ class SkipPhaseView(discord.ui.View):
             )
             await self.message.edit(embed=embed, view=None)
             
-            # Chuyển sang pha voting
+            # Chuyển sang pha voting - Sửa dòng này
             await asyncio.sleep(2)  # Đợi 2 giây để người chơi đọc thông báo
             self.disable_all_items()  # Vô hiệu hóa các nút
-            await start_voting_phase(interaction, self.game_state)
+            await voting_phase(interaction, self.game_state)  # Sửa ở đây
             return True
         return False
     
