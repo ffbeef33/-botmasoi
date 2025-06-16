@@ -1,5 +1,5 @@
 # views/voting_views.py
-# UI Components cho việc bỏ phiếu
+# UI Components cho việc bỏ phiếu. u
 
 import discord
 import logging
