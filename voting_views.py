@@ -177,7 +177,7 @@ class GameEndView(discord.ui.View):
             
             # Disable button để ngăn nhấn nhiều lần
             button.disabled = True
-            self.children[0].disabled = True  # Disable nút Start New Game cũng
+            self.children[0].disabled = True  # Disable nút Start New Game cũn
             try:
                 await interaction.message.edit(view=self)
             except:
